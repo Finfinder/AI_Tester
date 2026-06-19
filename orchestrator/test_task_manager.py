@@ -1,6 +1,8 @@
-import pytest
 import os
-from ai_tester_v2.orchestrator.task_manager import (
+
+import pytest
+
+from orchestrator.task_manager import (
     TaskManager,
     WorkspaceAlreadyExistsError,
     WorkspaceCleanupError,
@@ -41,7 +43,7 @@ def test_create_workspace_already_exists(temp_dir: str, source_dir: str, monkeyp
     """Test handling of workspace already existing."""
     manager = TaskManager(temp_base_dir=temp_dir)
     monkeypatch.setattr(
-        "ai_tester_v2.orchestrator.task_manager.uuid.uuid4",
+        "orchestrator.task_manager.uuid.uuid4",
         lambda: "fixed-workspace",
     )
     manager.create_workspace(source_repo=source_dir)

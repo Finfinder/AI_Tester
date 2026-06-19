@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from ai_tester_v2.agents.vscode_adapter import FakeVsCodeAdapter, WorkspacePathError
-from ai_tester_v2.agents.vscode_adapter.adapter import (
+from agents.vscode_adapter import FakeVsCodeAdapter, WorkspacePathError
+from agents.vscode_adapter.adapter import (
     VsCodeAdapter,
     ensure_inside_workspace,
     resolve_workspace_path,

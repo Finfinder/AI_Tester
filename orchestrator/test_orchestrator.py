@@ -1,15 +1,16 @@
 """Unit tests for the Orchestrator class."""
 
 import os
+
 import pytest
 
-from ai_tester_v2.orchestrator.orchestrator import (
+from orchestrator.orchestrator import (
     Orchestrator,
     PlanValidationError,
     WorkspaceError,
 )
-from ai_tester_v2.orchestrator.config import Config
-from ai_tester_v2.orchestrator.models import Task
+from orchestrator.config import Config
+from orchestrator.models import Task
 
 
 @pytest.fixture

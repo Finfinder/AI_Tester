@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ai_tester_v2.agents.vscode_adapter.adapter import (
+from agents.vscode_adapter.adapter import (
     VsCodeAdapter,
     WorkspacePathError,
     ensure_inside_workspace,

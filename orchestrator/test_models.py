@@ -1,10 +1,11 @@
-from ai_tester_v2.orchestrator.models import (
+from datetime import datetime
+
+from orchestrator.models import (
     Task,
     PhaseResult,
     TaskResult,
     BenchmarkResult,
 )
-from datetime import datetime
 
 
 def test_task_model_serialization():

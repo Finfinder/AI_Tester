@@ -1,5 +1,6 @@
 import pytest
-from ai_tester_v2.orchestrator.tool_logger import ToolLogger
+
+from orchestrator.tool_logger import ToolLogger
 
 
 @pytest.fixture

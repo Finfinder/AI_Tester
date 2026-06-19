@@ -5,11 +5,12 @@ Manages task lifecycle, timing, and logging.
 """
 
 from typing import List
-from ai_tester_v2.orchestrator.config import Config
-from ai_tester_v2.orchestrator.task_manager import TaskManager, WorkspaceCleanupError
-from ai_tester_v2.orchestrator.time_tracker import TimeTracker
-from ai_tester_v2.orchestrator.tool_logger import ToolLogger
-from ai_tester_v2.orchestrator.models import (
+
+from orchestrator.config import Config
+from orchestrator.task_manager import TaskManager, WorkspaceCleanupError
+from orchestrator.time_tracker import TimeTracker
+from orchestrator.tool_logger import ToolLogger
+from orchestrator.models import (
     Task,
     TaskResult,
     BenchmarkResult,
