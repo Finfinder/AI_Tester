@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AI_Tester v2 — Task Result",
+  "description": "Schema for per-task result details per Decyzja 13.",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Unique identifier for the task"
+    },
+    "task_type": {
+      "type": "string",
+      "enum": ["feature", "refactor", "debug"],
+      "description": "Type of task"
+    },
+    "repo": {
+      "type": "string",
+      "description": "Target repository"
+    },
+    "model": {
+      "type": "string",
+      "description": "Primary model used for the task"
+    },
+    "judge_model": {
+      "type": "string",
+      "description": "Model used for judging"
+    },
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "phase": { "type": "string" },
+          "status": { "type": "string", "enum": ["success", "failure", "incomplete"] },
+          "duration_seconds": { "type": "number", "minimum": 0 }
+        },
+        "required": ["phase", "status", "duration_seconds"]
+      }
+    },
+    "time": {
+      "type": "number",
+      "description": "Total execution time in seconds",
+      "minimum": 0
+    },
+    "scores": {
+      "type": "object",
+      "description": "Detailed scores from various metrics",
+      "additionalProperties": { "type": "number" }
+    },
+    "details": {
+      "type": "object",
+      "description": "Raw or summarized findings from the task execution"
+    }
+  },
+  "required": ["task_id", "task_type", "repo", "model", "judge_model", "phases", "time", "scores", "details"]
+}

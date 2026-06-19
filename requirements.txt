@@ -1,5 +1,6 @@
 langchain
 openai
 openai-evals
+pydantic
 pytest
 pytest-json-report
