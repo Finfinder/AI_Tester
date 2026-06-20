@@ -5,6 +5,7 @@ Manages task lifecycle, timing, logging and OpenRouter model execution.
 """
 
 from typing import Any, List, Mapping, Protocol
+import warnings
 
 from agents.openrouter_adapter import OpenRouterAdapter
 from agents.openrouter_models import OpenRouterRequestMetadata
@@ -100,6 +101,10 @@ class Orchestrator:
     """Main orchestrator class coordinating the AI_Tester v2 workflow."""
 
     def __init__(self, config: Config, adapter: AdapterProtocol | None = None) -> None:
+        if adapter is None and not hasattr(config, "openrouter_config"):
+            raise TypeError(
+                "config must implement openrouter_config() when no adapter is provided"
+            )
         self.config = config
         self._default_adapter = adapter is None
         self.task_manager = TaskManager(temp_base_dir=config.TEMP_BASE_DIR)
@@ -110,6 +115,33 @@ class Orchestrator:
         self.adapter = adapter or OpenRouterAdapter(
             config=config.openrouter_config(), logger=self.tool_logger
         )
+
+    def close(self) -> None:
+        """Close the adapter when owned by this orchestrator.
+
+        Delegates to the adapter's ``close()`` only when the orchestrator
+        created the adapter itself (i.e. no adapter was injected).
+        Safe to call multiple times.
+        """
+        if getattr(self, "_default_adapter", False) and hasattr(self.adapter, "close"):
+            self.adapter.close()  # type: ignore[union-attr]
+
+    def __enter__(self) -> "Orchestrator":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        if getattr(self, "_default_adapter", False) and hasattr(self.adapter, "close"):
+            warnings.warn(
+                "Orchestrator was garbage-collected without calling close(). "
+                "Use a context manager (``with Orchestrator(...) as o``) or "
+                "call ``close()`` explicitly to avoid resource leaks.",
+                ResourceWarning,
+                stacklevel=2,
+            )
+            self.close()  # type: ignore[union-attr]
 
     def validate_plan_structure(self, plan_content: str) -> bool:
         """Validate the structure of the provided plan against required sections.
@@ -183,6 +215,7 @@ class Orchestrator:
         if hasattr(completion, "model") and hasattr(completion, "status_code"):
             openrouter_requests.append(
                 OpenRouterRequestMetadata(
+                    request_id=getattr(completion, "request_id", None),
                     role=role,
                     model=str(getattr(completion, "model")),
                     status_code=int(getattr(completion, "status_code")),
@@ -216,12 +249,12 @@ class Orchestrator:
             self.time_tracker.start_phase("plan")
             try:
                 plan_prompt = self._build_plan_prompt(task)
-                self.validate_plan_structure(plan_prompt)
                 plan_completion = active_adapter.generate(
                     prompt_or_messages=plan_prompt,
                     role="plan",
                 )
                 plan_content = self._completion_content(plan_completion)
+                self.validate_plan_structure(plan_content)
                 self._record_openrouter_completion(
                     openrouter_requests, "plan", plan_completion
                 )
@@ -345,6 +378,16 @@ class Orchestrator:
 
 # Example usage (for testing purposes)
 if __name__ == "__main__":
+    from agents.openrouter_models import (
+        OPENROUTER_API_KEY_ENV_VAR,
+        OPENROUTER_BASE_URL_DEFAULT,
+        OPENROUTER_MAX_RETRIES_DEFAULT,
+        OPENROUTER_MAX_TOKENS_DEFAULT,
+        OPENROUTER_RETRY_BACKOFF_SECONDS_DEFAULT,
+        OPENROUTER_TIMEOUT_SECONDS_DEFAULT,
+        OpenRouterConfig,
+    )
+
     # Setup dummy config
     class MockConfig:
         SOURCE_REPO_PATH = "dummy_src"
@@ -353,6 +396,38 @@ if __name__ == "__main__":
         DEFAULT_JUDGE_MODEL = "gpt-3.5"
         PLAN_TEMPLATE_PATH = "dummy/plan.json"
         REPORT_SCHEMA_VERSION = "2.0"
+        OPENROUTER_BASE_URL = OPENROUTER_BASE_URL_DEFAULT
+        OPENROUTER_API_KEY_ENV_VAR = OPENROUTER_API_KEY_ENV_VAR
+        OPENROUTER_HTTP_REFERER = None
+        OPENROUTER_APP_TITLE = "AI_Tester v2"
+        OPENROUTER_APP_CATEGORIES: list[str] = []
+        OPENROUTER_TIMEOUT_SECONDS = OPENROUTER_TIMEOUT_SECONDS_DEFAULT
+        OPENROUTER_MAX_RETRIES = OPENROUTER_MAX_RETRIES_DEFAULT
+        OPENROUTER_RETRY_BACKOFF_SECONDS = OPENROUTER_RETRY_BACKOFF_SECONDS_DEFAULT
+        OPENROUTER_MAX_TOKENS = OPENROUTER_MAX_TOKENS_DEFAULT
+        OPENROUTER_TEMPERATURE = 0.2
+        OPENROUTER_PLAN_MODEL = None
+        OPENROUTER_IMPLEMENT_MODEL = None
+        OPENROUTER_JUDGE_MODEL = None
+
+        def openrouter_config(self) -> OpenRouterConfig:
+            return OpenRouterConfig(
+                base_url=self.OPENROUTER_BASE_URL,
+                api_key_env_var=self.OPENROUTER_API_KEY_ENV_VAR,
+                http_referer=self.OPENROUTER_HTTP_REFERER,
+                app_title=self.OPENROUTER_APP_TITLE,
+                app_categories=self.OPENROUTER_APP_CATEGORIES,
+                timeout_seconds=self.OPENROUTER_TIMEOUT_SECONDS,
+                max_retries=self.OPENROUTER_MAX_RETRIES,
+                retry_backoff_seconds=self.OPENROUTER_RETRY_BACKOFF_SECONDS,
+                max_tokens=self.OPENROUTER_MAX_TOKENS,
+                temperature=self.OPENROUTER_TEMPERATURE,
+                models={
+                    "plan": self.OPENROUTER_PLAN_MODEL or self.DEFAULT_MODEL,
+                    "implement": self.OPENROUTER_IMPLEMENT_MODEL or self.DEFAULT_MODEL,
+                    "judge": self.OPENROUTER_JUDGE_MODEL or self.DEFAULT_JUDGE_MODEL,
+                },
+            )
 
     mock_config = MockConfig()
 

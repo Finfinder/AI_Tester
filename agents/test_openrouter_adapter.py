@@ -124,7 +124,7 @@ def test_generate_reads_api_key_from_configured_env_var(monkeypatch):
 
     adapter.generate("Plan", role="plan")
 
-    assert seen_authorization == pytest.approx("Bearer custom-key")
+    assert seen_authorization == "Bearer custom-key"
 
 
 def test_missing_api_key_raises_clear_error_without_leaking_key():

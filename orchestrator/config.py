@@ -42,9 +42,9 @@ class Config(BaseModel):
     )
     OPENROUTER_MAX_TOKENS: int = Field(default=OPENROUTER_MAX_TOKENS_DEFAULT, gt=0)
     OPENROUTER_TEMPERATURE: float = Field(default=0.2, ge=0, le=2)
-    OPENROUTER_PLAN_MODEL: str = DEFAULT_MODEL
-    OPENROUTER_IMPLEMENT_MODEL: str = DEFAULT_MODEL
-    OPENROUTER_JUDGE_MODEL: str = DEFAULT_JUDGE_MODEL
+    OPENROUTER_PLAN_MODEL: str | None = None
+    OPENROUTER_IMPLEMENT_MODEL: str | None = None
+    OPENROUTER_JUDGE_MODEL: str | None = None
 
     def openrouter_config(self) -> OpenRouterConfig:
         """Build the OpenRouter adapter configuration without storing secrets."""
@@ -60,8 +60,8 @@ class Config(BaseModel):
             max_tokens=self.OPENROUTER_MAX_TOKENS,
             temperature=self.OPENROUTER_TEMPERATURE,
             models={
-                "plan": self.OPENROUTER_PLAN_MODEL,
-                "implement": self.OPENROUTER_IMPLEMENT_MODEL,
-                "judge": self.OPENROUTER_JUDGE_MODEL,
+                "plan": self.OPENROUTER_PLAN_MODEL or self.DEFAULT_MODEL,
+                "implement": self.OPENROUTER_IMPLEMENT_MODEL or self.DEFAULT_MODEL,
+                "judge": self.OPENROUTER_JUDGE_MODEL or self.DEFAULT_JUDGE_MODEL,
             },
         )

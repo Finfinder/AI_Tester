@@ -22,11 +22,19 @@ class FakeAdapter:
     @staticmethod
     def _completion(role: str):
         model_id = "judge-model" if role == "judge" else "tested-model"
+        if role == "plan":
+            content = (
+                "Proponowane Rozwiazanie\n"
+                "Plan Implementacji\n"
+                "Definition of Done"
+            )
+        else:
+            content = f"Fake {role} response"
         return type(
             "FakeCompletion",
             (),
             {
-                "content": f"Fake {role} response",
+                "content": content,
                 "model": model_id,
                 "status_code": 200,
                 "duration_seconds": 0.1,
@@ -196,4 +204,116 @@ def test_run_task_workspace_error(config: Config):
         source="/nonexistent/source/path",
     )
     with pytest.raises(WorkspaceError):
+        orchestrator.run_task(task)
+
+
+class FakeAdapterBadPlan:
+    """Adapter that returns a plan missing required sections."""
+
+    def __init__(self):
+        self.calls = []
+
+    def generate(
+        self,
+        prompt_or_messages,
+        role,
+        temperature=None,
+        max_tokens=None,
+        extra_body=None,
+    ):
+        self.calls.append((role, prompt_or_messages, extra_body))
+        return type(
+            "FakeCompletion",
+            (),
+            {
+                "content": "This is a bad plan without required headings.",
+                "model": "tested-model",
+                "status_code": 200,
+                "duration_seconds": 0.1,
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "total_tokens": 30,
+                "estimated_cost_usd": 0.0001,
+                "retry_count": 0,
+            },
+        )()
+
+    def generate_structured(self, *args, **kwargs):
+        raise NotImplementedError
+
+
+class FakeAdapterGoodPlan:
+    """Adapter that returns a plan with all required sections."""
+
+    def __init__(self):
+        self.calls = []
+
+    def generate(
+        self,
+        prompt_or_messages,
+        role,
+        temperature=None,
+        max_tokens=None,
+        extra_body=None,
+    ):
+        self.calls.append((role, prompt_or_messages, extra_body))
+        return type(
+            "FakeCompletion",
+            (),
+            {
+                "content": (
+                    "Proponowane Rozwiazanie\n"
+                    "Plan Implementacji\n"
+                    "Definition of Done"
+                ),
+                "model": "tested-model",
+                "status_code": 200,
+                "duration_seconds": 0.1,
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "total_tokens": 30,
+                "estimated_cost_usd": 0.0001,
+                "retry_count": 0,
+            },
+        )()
+
+    def generate_structured(self, *args, **kwargs):
+        raise NotImplementedError
+
+
+def test_run_task_validates_plan_from_model_response(config: Config, source_dir):
+    """Plan validation must run on model output, not on the prompt.
+
+    If the adapter returns content missing required sections, run_task
+    must raise PlanValidationError - proving validation targets the
+    model's response rather than the outbound prompt.
+    """
+    orchestrator = Orchestrator(config, adapter=FakeAdapterBadPlan())
+    task = Task(
+        task_id="T_BAD_PLAN",
+        task_type="feature",
+        repo="test_repo",
+        source=source_dir,
+    )
+    with pytest.raises(PlanValidationError, match="missing required sections"):
+        orchestrator.run_task(task)
+
+
+def test_run_task_accepts_valid_plan_from_model(config: Config, source_dir):
+    """A well-structured plan from the model must pass validation.
+
+    Uses a fake adapter whose generate() returns content containing
+    all required headings, so run_task proceeds past the plan phase.
+    """
+    orchestrator = Orchestrator(config, adapter=FakeAdapterGoodPlan())
+    task = Task(
+        task_id="T_GOOD_PLAN",
+        task_type="feature",
+        repo="test_repo",
+        source=source_dir,
+    )
+    # Should not raise PlanValidationError; will fail later in review
+    # phase because FakeAdapterGoodPlan.generate_structured is not
+    # implemented - that is acceptable for this test's scope.
+    with pytest.raises(NotImplementedError):
         orchestrator.run_task(task)
