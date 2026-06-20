@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "AI_Tester v2 — Task Result",
+  "title": "AI_Tester v2 - Task Result",
   "description": "Schema for per-task result details per Decyzja 13.",
   "type": "object",
   "properties": {
@@ -50,7 +50,62 @@
     "details": {
       "type": "object",
       "description": "Raw or summarized findings from the task execution"
+    },
+    "openrouter_requests": {
+      "type": "array",
+      "description": "Redacted OpenRouter request metadata for this task.",
+      "items": { "$ref": "#/definitions/openrouterRequestMetadata" }
     }
   },
-  "required": ["task_id", "task_type", "repo", "model", "judge_model", "phases", "time", "scores", "details"]
+  "required": [
+    "task_id",
+    "task_type",
+    "repo",
+    "model",
+    "judge_model",
+    "phases",
+    "time",
+    "scores",
+    "details",
+    "openrouter_requests"
+  ],
+  "definitions": {
+    "openrouterRequestMetadata": {
+      "type": "object",
+      "properties": {
+        "request_id": { "type": ["string", "null"] },
+        "role": { "type": "string", "enum": ["plan", "implement", "judge"] },
+        "model": { "type": "string" },
+        "status_code": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "duration_seconds": { "type": "number", "minimum": 0 },
+        "input_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "total_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "estimated_cost_usd": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "role",
+        "model",
+        "status_code",
+        "duration_seconds",
+        "retry_count"
+      ]
+    }
+  }
 }

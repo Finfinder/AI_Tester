@@ -95,6 +95,37 @@ class ToolLogger:
         self.log_entries.append(entry)
         self.logger.info(json.dumps(entry))
 
+    def log_openrouter_request(
+        self,
+        role: str,
+        model: str,
+        status_code: int,
+        duration_seconds: float,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        estimated_cost_usd: float | None,
+        request_id: str | None = None,
+        total_tokens: int | None = None,
+        retry_count: int = 0,
+    ):
+        """Logs a redacted OpenRouter request with safe metadata only."""
+        entry = {
+            "type": "ai_tool",
+            "tool": "openrouter",
+            "request_id": request_id,
+            "role": role,
+            "model": model,
+            "status_code": status_code,
+            "duration_seconds": duration_seconds,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": estimated_cost_usd,
+            "retry_count": retry_count,
+        }
+        self.log_entries.append(entry)
+        self.logger.info(json.dumps(entry))
+
     def get_log_entries(self) -> List[Dict[str, Any]]:
         """Returns all recorded log entries."""
         return self.log_entries

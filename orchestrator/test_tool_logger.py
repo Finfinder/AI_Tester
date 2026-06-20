@@ -64,3 +64,36 @@ def test_log_ai_tool(logger: ToolLogger):
     assert logs[0]["type"] == "ai_tool"
     assert logs[0]["tool"] == tool
     assert logs[0]["query"] == query
+
+
+def test_log_openrouter_request_is_redacted(logger: ToolLogger):
+    """Test OpenRouter logs contain safe metadata only."""
+    logger.log_openrouter_request(
+        role="judge",
+        model="judge-model",
+        status_code=200,
+        duration_seconds=0.1,
+        input_tokens=10,
+        output_tokens=20,
+        estimated_cost_usd=0.0001,
+        request_id="req_1",
+        total_tokens=30,
+        retry_count=0,
+    )
+
+    logs = logger.get_log_entries()
+    assert len(logs) == 1
+    assert logs[0]["type"] == "ai_tool"
+    assert logs[0]["tool"] == "openrouter"
+    assert logs[0]["role"] == "judge"
+    assert logs[0]["model"] == "judge-model"
+    assert logs[0]["status_code"] == 200
+    assert logs[0]["duration_seconds"] == pytest.approx(0.1)
+    assert logs[0]["input_tokens"] == 10
+    assert logs[0]["output_tokens"] == 20
+    assert logs[0]["total_tokens"] == 30
+    assert logs[0]["estimated_cost_usd"] == pytest.approx(0.0001)
+    assert logs[0]["retry_count"] == 0
+    assert "Authorization" not in logs[0]
+    assert "OPENROUTER_API_KEY" not in logs[0]
+    assert "test-key" not in logs[0]

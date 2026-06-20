@@ -13,6 +13,69 @@ from orchestrator.config import Config
 from orchestrator.models import Task
 
 
+class FakeAdapter:
+    """Deterministic OpenRouter adapter test double."""
+
+    def __init__(self):
+        self.calls = []
+
+    @staticmethod
+    def _completion(role: str):
+        model_id = "judge-model" if role == "judge" else "tested-model"
+        return type(
+            "FakeCompletion",
+            (),
+            {
+                "content": f"Fake {role} response",
+                "model": model_id,
+                "status_code": 200,
+                "duration_seconds": 0.1,
+                "input_tokens": 10,
+                "output_tokens": 20,
+                "total_tokens": 30,
+                "estimated_cost_usd": 0.0001,
+                "retry_count": 0,
+            },
+        )()
+
+    def generate(
+        self,
+        prompt_or_messages,
+        role,
+        temperature=None,
+        max_tokens=None,
+        extra_body=None,
+    ):
+        self.calls.append((role, prompt_or_messages, extra_body))
+        return self._completion(role)
+
+    def generate_structured(
+        self,
+        prompt_or_messages,
+        schema,
+        role,
+        schema_name,
+    ):
+        self.calls.append((role, prompt_or_messages, {"schema": schema_name}))
+        payload = {
+            "scores": {
+                "plan": 90,
+                "implementation": 88,
+                "tools_and_terminal": 85,
+                "overall": 88,
+            },
+            "summary": "Fake review.",
+            "findings": ["No findings."],
+        }
+        return payload, self._completion(role)
+
+
+@pytest.fixture
+def fake_adapter():
+    """Provide deterministic adapter calls for orchestrator tests."""
+    return FakeAdapter()
+
+
 @pytest.fixture
 def config(tmp_path):
     """Provide a test configuration using a temporary directory."""
@@ -41,9 +104,9 @@ def task(source_dir):
     )
 
 
-def test_run_task_flow(config: Config, task: Task):
+def test_run_task_flow(config: Config, task: Task, fake_adapter: FakeAdapter):
     """Test that run_task executes the full workflow and returns a TaskResult."""
-    orchestrator = Orchestrator(config)
+    orchestrator = Orchestrator(config, adapter=fake_adapter)
     result = orchestrator.run_task(task)
 
     assert result.task_id == "T1"
@@ -54,15 +117,21 @@ def test_run_task_flow(config: Config, task: Task):
     assert len(result.phases) == 3
     assert all(p.status == "success" for p in result.phases)
     assert result.time > 0
+    assert [request.role for request in result.openrouter_requests] == [
+        "plan",
+        "implement",
+        "judge",
+    ]
+    assert len(fake_adapter.calls) == 3
 
 
-def test_run_benchmark_flow(config: Config, source_dir: str):
+def test_run_benchmark_flow(config: Config, source_dir: str, fake_adapter: FakeAdapter):
     """Test that run_benchmark executes multiple tasks and returns a BenchmarkResult."""
     tasks = [
         Task(task_id="T1", task_type="feature", repo="r1", source=source_dir),
         Task(task_id="T2", task_type="debug", repo="r2", source=source_dir),
     ]
-    orchestrator = Orchestrator(config)
+    orchestrator = Orchestrator(config, adapter=fake_adapter)
     result = orchestrator.run_benchmark(
         tasks=tasks, model="gpt-4", judge_model="gpt-4-turbo"
     )
@@ -73,6 +142,26 @@ def test_run_benchmark_flow(config: Config, source_dir: str):
     assert result.total_time_seconds > 0
     assert result.tasks[0].task_id == "T1"
     assert result.tasks[1].task_id == "T2"
+    assert all(
+        len(task_result.openrouter_requests) == 3 for task_result in result.tasks
+    )
+
+
+def test_create_adapter_uses_benchmark_models(config: Config):
+    """Test benchmark-specific model overrides on the default adapter."""
+    orchestrator = Orchestrator(config)
+    adapter = orchestrator._create_adapter(
+        model="tested-model", judge_model="judge-model"
+    )
+
+    try:
+        assert adapter.config.models == {
+            "plan": "tested-model",
+            "implement": "tested-model",
+            "judge": "judge-model",
+        }
+    finally:
+        adapter.close()
 
 
 def test_validate_plan_structure_valid(config: Config):
