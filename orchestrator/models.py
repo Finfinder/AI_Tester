@@ -1,5 +1,6 @@
 """AI_Tester v2 - Data models for the orchestrator."""
 
+from agents.openrouter_models import OpenRouterRequestMetadata
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -67,6 +68,10 @@ class TaskResult(BaseModel):
     )
     details: Dict[str, Any] = Field(
         default_factory=dict, description="Detailed output and findings."
+    )
+    openrouter_requests: List[OpenRouterRequestMetadata] = Field(
+        default_factory=list,
+        description="Redacted OpenRouter request metadata for this task.",
     )
 
 

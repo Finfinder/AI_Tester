@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "AI_Tester v2 — Model Ranking Report",
+  "title": "AI_Tester v2 - Model Ranking Report",
   "description": "Schema for model ranking output (0-100) per Decyzja 10 and Decyzja 13.",
   "type": "object",
   "properties": {
@@ -19,7 +19,33 @@
         "model": { "type": "string" },
         "judge_model": { "type": "string" },
         "tasks_count": { "type": "integer", "minimum": 0 },
-        "total_time_seconds": { "type": "number", "minimum": 0 }
+        "total_time_seconds": { "type": "number", "minimum": 0 },
+        "openrouter": {
+          "type": "object",
+          "description": "Aggregated redacted OpenRouter usage metadata.",
+          "properties": {
+            "provider": { "type": "string", "const": "openrouter" },
+            "model": { "type": "string" },
+            "judge_model": { "type": "string" },
+            "total_input_tokens": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "total_output_tokens": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "total_tokens": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "total_estimated_cost_usd": {
+              "type": ["number", "null"],
+              "minimum": 0
+            }
+          },
+          "required": ["provider", "model", "judge_model"]
+        }
       },
       "required": ["model", "judge_model", "tasks_count"]
     },
@@ -48,6 +74,43 @@
   },
   "required": ["version", "timestamp", "ranking"],
   "definitions": {
+    "openrouterRequestMetadata": {
+      "type": "object",
+      "properties": {
+        "request_id": { "type": ["string", "null"] },
+        "role": { "type": "string", "enum": ["plan", "implement", "judge"] },
+        "model": { "type": "string" },
+        "status_code": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "duration_seconds": { "type": "number", "minimum": 0 },
+        "input_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "total_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "estimated_cost_usd": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "retry_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "role",
+        "model",
+        "status_code",
+        "duration_seconds",
+        "retry_count"
+      ]
+    },
     "taskResult": {
       "type": "object",
       "properties": {
@@ -70,7 +133,11 @@
             "review_seconds": { "type": "number", "minimum": 0 }
           }
         },
-        "details": { "type": "object" }
+        "details": { "type": "object" },
+        "openrouter_requests": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/openrouterRequestMetadata" }
+        }
       },
       "required": ["task_id", "task_type", "repo"]
     }
