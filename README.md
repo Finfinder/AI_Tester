@@ -118,6 +118,39 @@ The review stage uses `generate_structured(...)` with `response_format: {"type":
 
 Each OpenRouter request is recorded as redacted metadata containing request id, role, model, status code, duration, token counts, estimated cost, and retry count. Logs use `type: "ai_tool"` and `tool: "openrouter"` and never include `Authorization`, the API key, request headers, or full payloads.
 
+### PromptLoader integration
+
+`PromptLoader` loads AI_Instruction prompt templates (``/plan``, ``/implement``, ``/review``) from a configured AI_Instruction repository and renders them with runtime context (task metadata, workspace path, plan content, implementation summary). This keeps the canonical prompt definitions in AI_Instruction as the single source of truth.
+
+Configure the AI_Instruction path:
+
+```python
+from orchestrator.config import Config
+
+config = Config(
+    AI_INSTRUCTION_PATH="/path/to/AI_Instruction",
+)
+```
+
+When ``AI_INSTRUCTION_PATH`` is empty (default), the orchestrator falls back to built-in placeholder prompts so tests and local runs work without a clone of AI_Instruction.
+
+Prompt files are loaded from:
+
+- ``.github/prompts/plan.prompt.md``
+- ``.github/prompts/implement.prompt.md``
+- ``.github/prompts/review.prompt.md``
+
+If the path is set but a required file is missing, ``Orchestrator.__init__`` raises ``PromptLoaderIntegrationError``. The rendered prompts are passed to the adapter; only the prompt source paths are recorded in ``TaskResult.details["prompt_sources"]`` - full prompt content is never logged.
+
+The review prompt is extended with AI_Instruction review guardrails when the corresponding files exist:
+
+- ``Docs/OWASP_TOP_30_PLUS.md`` and ``.github/skills/code-reviewing/references/validations.md`` for security and validation references.
+- ``.github/skills/architecture-designing/plan.example.md`` and ``.github/skills/task-analysing/research.example.md`` for artifact structure validation.
+- A mapped table of 16 AI_Instruction skills used as explicit Judge criteria.
+- ``scripts/get-dependency-freshness-report.ps1`` as a dependency freshness report reference for SCA/dependency review.
+
+Prompt templates are cached after loading. If the AI_Instruction repository changes during a long-running process, call ``loader.invalidate_cache()`` or recreate the ``Orchestrator`` so templates and cached skill criteria are reloaded.
+
 ### Testing
 
 Default tests are deterministic and do not require network access or a real API key. They use `httpx.MockTransport` to assert request paths, headers, retry behavior, structured output payloads, and response parsing.

@@ -24,7 +24,7 @@ class Config(BaseModel):
     SOURCE_REPO_PATH: str = "src/"
     TEMP_BASE_DIR: str = "./temp"
     DEFAULT_MODEL: str = "openai/gpt-4.1-mini"
-    DEFAULT_JUDGE_MODEL: str = "openai/gpt-4.1-mini"
+    judge_model: str | None = None
     PLAN_TEMPLATE_PATH: str = "./templates/plan_template.md"
     REPORT_SCHEMA_VERSION: str = "1.0.0"
 
@@ -45,6 +45,7 @@ class Config(BaseModel):
     OPENROUTER_PLAN_MODEL: str | None = None
     OPENROUTER_IMPLEMENT_MODEL: str | None = None
     OPENROUTER_JUDGE_MODEL: str | None = None
+    AI_INSTRUCTION_PATH: str = ""
 
     def openrouter_config(self) -> OpenRouterConfig:
         """Build the OpenRouter adapter configuration without storing secrets."""
@@ -62,6 +63,10 @@ class Config(BaseModel):
             models={
                 "plan": self.OPENROUTER_PLAN_MODEL or self.DEFAULT_MODEL,
                 "implement": self.OPENROUTER_IMPLEMENT_MODEL or self.DEFAULT_MODEL,
-                "judge": self.OPENROUTER_JUDGE_MODEL or self.DEFAULT_JUDGE_MODEL,
+                "judge": (
+                    self.OPENROUTER_JUDGE_MODEL
+                    or self.judge_model
+                    or self.DEFAULT_MODEL
+                ),
             },
         )

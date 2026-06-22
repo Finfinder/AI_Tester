@@ -4,12 +4,14 @@ The main orchestrator class coordinating the AI_Tester v2 workflow.
 Manages task lifecycle, timing, logging and OpenRouter model execution.
 """
 
+from pathlib import Path
 from typing import Any, List, Mapping, Protocol
 import warnings
 
 from agents.openrouter_adapter import OpenRouterAdapter
 from agents.openrouter_models import OpenRouterRequestMetadata
 from orchestrator.config import Config
+from orchestrator.prompt_loader import PromptLoader, PromptLoaderError
 from orchestrator.task_manager import TaskManager, WorkspaceCleanupError
 from orchestrator.time_tracker import TimeTracker
 from orchestrator.tool_logger import ToolLogger
@@ -74,6 +76,12 @@ class WorkspaceError(WorkflowError):
     pass
 
 
+class PromptLoaderIntegrationError(WorkflowError):
+    """Raised when PromptLoader fails due to missing or invalid AI_Instruction path."""
+
+    pass
+
+
 class AdapterProtocol(Protocol):
     """Minimal protocol for OpenRouter adapters used by tests and production."""
 
@@ -115,6 +123,7 @@ class Orchestrator:
         self.adapter = adapter or OpenRouterAdapter(
             config=config.openrouter_config(), logger=self.tool_logger
         )
+        self.prompt_loader = self._create_prompt_loader(config)
 
     def close(self) -> None:
         """Close the adapter when owned by this orchestrator.
@@ -162,7 +171,32 @@ class Orchestrator:
             )
         return True
 
-    def _build_plan_prompt(self, task: Task) -> str:
+    def _create_prompt_loader(self, config: Config) -> PromptLoader | None:
+        ai_path = getattr(config, "AI_INSTRUCTION_PATH", "")
+        if not ai_path:
+            return None
+        try:
+            return PromptLoader(ai_path)
+        except PromptLoaderError as exc:
+            raise PromptLoaderIntegrationError(
+                f"Failed to initialize PromptLoader: {exc}"
+            ) from exc
+
+    def _build_prompt_metadata(self) -> dict[str, Any]:
+        if self.prompt_loader is None:
+            return {}
+        sources = self.prompt_loader.sources
+        return {
+            "prompt_sources": {
+                "plan": sources.get("plan", ""),
+                "implement": sources.get("implement", ""),
+                "review": sources.get("review", ""),
+            }
+        }
+
+    def _build_plan_prompt(self, task: Task, workspace_path: str | Path) -> str:
+        if self.prompt_loader is not None:
+            return self.prompt_loader.render_plan_prompt(task, workspace_path)
         return (
             f"Plan for task {task.task_id}: "
             f"Implement {task.task_type} functionality in {task.repo}\n\n"
@@ -171,15 +205,29 @@ class Orchestrator:
             f"Definition of Done"
         )
 
-    def _build_implement_prompt(self, task: Task, plan_content: str) -> str:
+    def _build_implement_prompt(
+        self, task: Task, plan_content: str, workspace_path: str | Path
+    ) -> str:
+        if self.prompt_loader is not None:
+            return self.prompt_loader.render_implement_prompt(
+                task, plan_content, workspace_path
+            )
         return (
             f"Implement {task.task_type} functionality in {task.repo}.\n\n"
             f"Approved plan:\n{plan_content}"
         )
 
     def _build_review_prompt(
-        self, task: Task, plan_content: str, implementation_summary: str
+        self,
+        task: Task,
+        plan_content: str,
+        implementation_summary: str,
+        workspace_path: str | Path,
     ) -> str:
+        if self.prompt_loader is not None:
+            return self.prompt_loader.render_review_prompt(
+                task, plan_content, implementation_summary, workspace_path
+            )
         return (
             "Review the implementation against the plan and AI_Tester quality criteria.\n\n"
             f"Task: {task.task_id} ({task.task_type}) in {task.repo}\n"
@@ -248,7 +296,7 @@ class Orchestrator:
             # Plan Phase
             self.time_tracker.start_phase("plan")
             try:
-                plan_prompt = self._build_plan_prompt(task)
+                plan_prompt = self._build_plan_prompt(task, workspace_path)
                 plan_completion = active_adapter.generate(
                     prompt_or_messages=plan_prompt,
                     role="plan",
@@ -267,7 +315,9 @@ class Orchestrator:
             # Implement Phase
             self.time_tracker.start_phase("implement")
             try:
-                implementation_prompt = self._build_implement_prompt(task, plan_content)
+                implementation_prompt = self._build_implement_prompt(
+                    task, plan_content, workspace_path
+                )
                 implementation_completion = active_adapter.generate(
                     prompt_or_messages=implementation_prompt,
                     role="implement",
@@ -285,7 +335,7 @@ class Orchestrator:
             self.time_tracker.start_phase("review")
             try:
                 review_prompt = self._build_review_prompt(
-                    task, plan_content, implementation_summary
+                    task, plan_content, implementation_summary, workspace_path
                 )
                 review_payload, review_completion = active_adapter.generate_structured(
                     prompt_or_messages=review_prompt,
@@ -302,12 +352,23 @@ class Orchestrator:
             elapsed = self.time_tracker.get_all_elapsed()
             total_time = sum(elapsed.values())
 
+            prompt_metadata = self._build_prompt_metadata()
+            prompt_lengths = {
+                "plan": len(plan_prompt),
+                "implement": len(implementation_prompt),
+                "review": len(review_prompt),
+            }
+
             return TaskResult(
                 task_id=task.task_id,
                 task_type=task.task_type,
                 repo=task.repo,
                 model=self.config.DEFAULT_MODEL,
-                judge_model=self.config.DEFAULT_JUDGE_MODEL,
+                judge_model=(
+                    self.config.OPENROUTER_JUDGE_MODEL
+                    or self.config.judge_model
+                    or self.config.DEFAULT_MODEL
+                ),
                 phases=[
                     PhaseResult(
                         phase="plan",
@@ -329,7 +390,9 @@ class Orchestrator:
                 scores={"overall_score": 0.0},
                 details={
                     "message": "Workflow completed successfully.",
+                    "prompt_lengths": prompt_lengths,
                     "review": review_payload,
+                    **prompt_metadata,
                 },
                 openrouter_requests=openrouter_requests,
             )
@@ -378,33 +441,22 @@ class Orchestrator:
 
 # Example usage (for testing purposes)
 if __name__ == "__main__":
-    from agents.openrouter_models import (
-        OPENROUTER_API_KEY_ENV_VAR,
-        OPENROUTER_BASE_URL_DEFAULT,
-        OPENROUTER_MAX_RETRIES_DEFAULT,
-        OPENROUTER_MAX_TOKENS_DEFAULT,
-        OPENROUTER_RETRY_BACKOFF_SECONDS_DEFAULT,
-        OPENROUTER_TIMEOUT_SECONDS_DEFAULT,
-        OpenRouterConfig,
-    )
+    from agents.openrouter_models import OpenRouterConfig
 
     # Setup dummy config
     class MockConfig:
         SOURCE_REPO_PATH = "dummy_src"
         TEMP_BASE_DIR = "./temp_tasks"
         DEFAULT_MODEL = "gpt-4"
-        DEFAULT_JUDGE_MODEL = "gpt-3.5"
-        PLAN_TEMPLATE_PATH = "dummy/plan.json"
-        REPORT_SCHEMA_VERSION = "2.0"
-        OPENROUTER_BASE_URL = OPENROUTER_BASE_URL_DEFAULT
-        OPENROUTER_API_KEY_ENV_VAR = OPENROUTER_API_KEY_ENV_VAR
+        OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+        OPENROUTER_API_KEY_ENV_VAR = "OPENROUTER_API_KEY"
         OPENROUTER_HTTP_REFERER = None
         OPENROUTER_APP_TITLE = "AI_Tester v2"
         OPENROUTER_APP_CATEGORIES: list[str] = []
-        OPENROUTER_TIMEOUT_SECONDS = OPENROUTER_TIMEOUT_SECONDS_DEFAULT
-        OPENROUTER_MAX_RETRIES = OPENROUTER_MAX_RETRIES_DEFAULT
-        OPENROUTER_RETRY_BACKOFF_SECONDS = OPENROUTER_RETRY_BACKOFF_SECONDS_DEFAULT
-        OPENROUTER_MAX_TOKENS = OPENROUTER_MAX_TOKENS_DEFAULT
+        OPENROUTER_TIMEOUT_SECONDS = 30.0
+        OPENROUTER_MAX_RETRIES = 2
+        OPENROUTER_RETRY_BACKOFF_SECONDS = 1.0
+        OPENROUTER_MAX_TOKENS = 4096
         OPENROUTER_TEMPERATURE = 0.2
         OPENROUTER_PLAN_MODEL = None
         OPENROUTER_IMPLEMENT_MODEL = None
@@ -425,7 +477,7 @@ if __name__ == "__main__":
                 models={
                     "plan": self.OPENROUTER_PLAN_MODEL or self.DEFAULT_MODEL,
                     "implement": self.OPENROUTER_IMPLEMENT_MODEL or self.DEFAULT_MODEL,
-                    "judge": self.OPENROUTER_JUDGE_MODEL or self.DEFAULT_JUDGE_MODEL,
+                    "judge": self.OPENROUTER_JUDGE_MODEL or self.DEFAULT_MODEL,
                 },
             )
 

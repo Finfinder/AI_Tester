@@ -8,6 +8,7 @@ from orchestrator.orchestrator import (
     Orchestrator,
     PlanValidationError,
     WorkspaceError,
+    PromptLoaderIntegrationError,
 )
 from orchestrator.config import Config
 from orchestrator.models import Task
@@ -23,11 +24,7 @@ class FakeAdapter:
     def _completion(role: str):
         model_id = "judge-model" if role == "judge" else "tested-model"
         if role == "plan":
-            content = (
-                "Proponowane Rozwiazanie\n"
-                "Plan Implementacji\n"
-                "Definition of Done"
-            )
+            content = "Proponowane Rozwiazanie\nPlan Implementacji\nDefinition of Done"
         else:
             content = f"Fake {role} response"
         return type(
@@ -93,6 +90,26 @@ def config(tmp_path):
 
 
 @pytest.fixture
+def ai_instruction_dir(tmp_path):
+    """Create a temporary AI_Instruction repository with prompt files."""
+    prompts = tmp_path / ".github" / "prompts"
+    prompts.mkdir(parents=True)
+    (prompts / "plan.prompt.md").write_text(
+        "# Plan Prompt\n\nYou are an architect. Plan the implementation.\n",
+        encoding="utf-8",
+    )
+    (prompts / "implement.prompt.md").write_text(
+        "# Implement Prompt\n\nYou are a software engineer. Implement the plan.\n",
+        encoding="utf-8",
+    )
+    (prompts / "review.prompt.md").write_text(
+        "# Review Prompt\n\nYou are a code reviewer. Review the implementation.\n",
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+@pytest.fixture
 def source_dir(tmp_path):
     """Provide a dummy source directory with a Python file."""
     src = tmp_path / "source_repo"
@@ -121,16 +138,48 @@ def test_run_task_flow(config: Config, task: Task, fake_adapter: FakeAdapter):
     assert result.task_type == "feature"
     assert result.repo == "test_repo"
     assert result.model == config.DEFAULT_MODEL
-    assert result.judge_model == config.DEFAULT_JUDGE_MODEL
+    assert result.judge_model == config.DEFAULT_MODEL
     assert len(result.phases) == 3
     assert all(p.status == "success" for p in result.phases)
     assert result.time > 0
+    assert result.details["prompt_lengths"] == {
+        "plan": len(fake_adapter.calls[0][1]),
+        "implement": len(fake_adapter.calls[1][1]),
+        "review": len(fake_adapter.calls[2][1]),
+    }
     assert [request.role for request in result.openrouter_requests] == [
         "plan",
         "implement",
         "judge",
     ]
     assert len(fake_adapter.calls) == 3
+
+
+def test_run_task_uses_configured_judge_model(
+    config: Config, task: Task, fake_adapter: FakeAdapter
+):
+    """Config.judge_model is used as the default judge model when OPENROUTER_JUDGE_MODEL is unset."""
+    config.judge_model = "openai/gpt-4.1"
+    orchestrator = Orchestrator(config, adapter=fake_adapter)
+
+    result = orchestrator.run_task(task)
+
+    assert result.judge_model == "openai/gpt-4.1"
+    assert config.openrouter_config().models["judge"] == "openai/gpt-4.1"
+
+
+def test_run_task_prefers_openrouter_judge_model(
+    config: Config, task: Task, fake_adapter: FakeAdapter
+):
+    """OPENROUTER_JUDGE_MODEL takes precedence over Config.judge_model."""
+    config.judge_model = "openai/gpt-4.1"
+    config.OPENROUTER_JUDGE_MODEL = "anthropic/claude-3.5-sonnet"
+    orchestrator = Orchestrator(config, adapter=fake_adapter)
+
+    result = orchestrator.run_task(task)
+
+    assert result.judge_model == "anthropic/claude-3.5-sonnet"
+    assert config.openrouter_config().models["judge"] == "anthropic/claude-3.5-sonnet"
 
 
 def test_run_benchmark_flow(config: Config, source_dir: str, fake_adapter: FakeAdapter):
@@ -262,9 +311,7 @@ class FakeAdapterGoodPlan:
             (),
             {
                 "content": (
-                    "Proponowane Rozwiazanie\n"
-                    "Plan Implementacji\n"
-                    "Definition of Done"
+                    "Proponowane Rozwiazanie\nPlan Implementacji\nDefinition of Done"
                 ),
                 "model": "tested-model",
                 "status_code": 200,
@@ -317,3 +364,79 @@ def test_run_task_accepts_valid_plan_from_model(config: Config, source_dir):
     # implemented - that is acceptable for this test's scope.
     with pytest.raises(NotImplementedError):
         orchestrator.run_task(task)
+
+
+# ---------------------------------------------------------------------------
+# PromptLoader integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_falls_back_without_ai_instruction_path(
+    config: Config, task: Task, fake_adapter: FakeAdapter
+):
+    """Without AI_INSTRUCTION_PATH, orchestrator uses built-in placeholder prompts."""
+    orchestrator = Orchestrator(config, adapter=fake_adapter)
+    assert orchestrator.prompt_loader is None
+    result = orchestrator.run_task(task)
+    assert result.task_id == "T1"
+    assert "prompt_sources" not in result.details
+    assert result.details["prompt_lengths"] == {
+        "plan": len(fake_adapter.calls[0][1]),
+        "implement": len(fake_adapter.calls[1][1]),
+        "review": len(fake_adapter.calls[2][1]),
+    }
+
+
+def test_orchestrator_uses_prompt_loader_when_configured(
+    config: Config,
+    task: Task,
+    fake_adapter: FakeAdapter,
+    ai_instruction_dir,
+):
+    """With AI_INSTRUCTION_PATH set, prompts come from AI_Instruction templates."""
+    config.AI_INSTRUCTION_PATH = str(ai_instruction_dir)
+    orchestrator = Orchestrator(config, adapter=fake_adapter)
+    assert orchestrator.prompt_loader is not None
+
+    result = orchestrator.run_task(task)
+    assert result.task_id == "T1"
+    assert "prompt_sources" in result.details
+    sources = result.details["prompt_sources"]
+    assert "plan" in sources
+    assert "implement" in sources
+    assert "review" in sources
+    assert os.path.join(".github", "prompts", "plan.prompt.md") in sources["plan"]
+
+
+def test_orchestrator_prompt_loader_missing_path_raises(
+    config: Config,
+    task: Task,
+    fake_adapter: FakeAdapter,
+):
+    """Invalid AI_INSTRUCTION_PATH raises PromptLoaderIntegrationError."""
+    config.AI_INSTRUCTION_PATH = "/nonexistent/ai_instruction_path"
+    with pytest.raises(
+        PromptLoaderIntegrationError, match="Failed to initialize PromptLoader"
+    ):
+        Orchestrator(config, adapter=fake_adapter)
+
+
+def test_run_task_flow_with_prompt_loader_sends_ai_instruction_content(
+    config: Config,
+    task: Task,
+    fake_adapter: FakeAdapter,
+    ai_instruction_dir,
+):
+    """Prompts sent to adapter contain AI_Instruction template content."""
+    config.AI_INSTRUCTION_PATH = str(ai_instruction_dir)
+    orchestrator = Orchestrator(config, adapter=fake_adapter)
+    orchestrator.run_task(task)
+
+    assert len(fake_adapter.calls) == 3
+    plan_prompt = fake_adapter.calls[0][1]
+    implement_prompt = fake_adapter.calls[1][1]
+    review_prompt = fake_adapter.calls[2][1]
+
+    assert "You are an architect. Plan the implementation." in plan_prompt
+    assert "You are a software engineer. Implement the plan." in implement_prompt
+    assert "You are a code reviewer. Review the implementation." in review_prompt
